@@ -1967,7 +1967,5 @@ void __attribute__((constructor)) luacrypto_init(void)
     SSL_load_error_strings();
     ERR_load_BIO_strings();
     OpenSSL_add_all_algorithms();
-    OpenSSL_add_all_digests();
-    OpenSSL_add_all_ciphers();
 #endif
 }
