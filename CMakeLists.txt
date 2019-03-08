@@ -4,7 +4,7 @@ CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
 FIND_PACKAGE(Lua51 REQUIRED)
 FIND_PACKAGE(OpenSSL REQUIRED)
 
-ADD_LIBRARY(crypto MODULE src/lcrypto.c)
+ADD_LIBRARY(crypto MODULE src/lcrypto.c src/ltls.c)
 SET_TARGET_PROPERTIES(crypto PROPERTIES PREFIX "")
 
 OPTION(EXTERNAL_INITIALIZATION "Do not call OpenSSL_add_all_*_() in luaopen_crypto(), assume external OpenSSL initialization" OFF)

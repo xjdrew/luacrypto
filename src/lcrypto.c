@@ -12,6 +12,7 @@
 #include <openssl/rand.h>
 #include <openssl/rsa.h>
 #include <openssl/x509.h>
+#include <openssl/ssl.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -30,6 +31,7 @@
 
 #include "lcrypto.h"
 #include "lcrypto_compat_110.h"
+#include "ltls.h"
 
 static int crypto_error(lua_State* L)
 {
@@ -1944,6 +1946,8 @@ int luaopen_crypto(lua_State* L)
         { "hex", luacrypto_hex },
         { "base64", luacrypto_base64_encode },
         { "unbase64", luacrypto_base64_decode },
+        { "newtls", ltls_newtls},
+        { "newctx", ltls_newctx},
         { NULL, NULL }
     };
 
@@ -1960,7 +1964,9 @@ int luaopen_crypto(lua_State* L)
 void __attribute__((constructor)) luacrypto_init(void)
 {
 #ifndef OPENSSL_EXTERNAL_INITIALIZATION
-    OpenSSL_add_all_digests();
-    OpenSSL_add_all_ciphers();
+    SSL_library_init();
+    SSL_load_error_strings();
+    ERR_load_BIO_strings();
+    OpenSSL_add_all_algorithms();
 #endif
 }
