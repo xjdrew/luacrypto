@@ -4,6 +4,7 @@
 #include <lua.h>
 #include <lauxlib.h>
 
-int ltls_new(lua_State* L);
+int ltls_newtls(lua_State* L);
+int ltls_newctx(lua_State* L);
 
 #endif

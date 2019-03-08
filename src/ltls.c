@@ -10,9 +10,7 @@
 
 #include "ltls.h"
 
-
 struct tls_context {
-    SSL_CTX* ctx;
     SSL* ssl;
     BIO* in_bio;
     BIO* out_bio;
@@ -20,6 +18,9 @@ struct tls_context {
     bool is_close;
 };
 
+struct ssl_ctx {
+    SSL_CTX* ctx;
+};
 
 // static int
 // _ssl_verify_peer(int ok, X509_STORE_CTX* ctx) {
@@ -28,8 +29,8 @@ struct tls_context {
 
 
 static void
-_init_bio(lua_State* L, struct tls_context* tls_p) {
-    tls_p->ssl = SSL_new(tls_p->ctx);
+_init_bio(lua_State* L, struct tls_context* tls_p, struct ssl_ctx* ctx_p) {
+    tls_p->ssl = SSL_new(ctx_p->ctx);
     if(!tls_p->ssl) {
         luaL_error(L, "SSL_new faild");
     }
@@ -51,23 +52,16 @@ _init_bio(lua_State* L, struct tls_context* tls_p) {
 
 
 static void
-_init_client_context(lua_State* L, struct tls_context* tls_p) {
-    tls_p->ctx = SSL_CTX_new(TLSv1_2_client_method());
-    if(!tls_p->ctx) {
-        luaL_error(L, "SSL_CTX_new client faild.");
-    }
-
+_init_client_context(lua_State* L, struct tls_context* tls_p, struct ssl_ctx* ctx_p) {
     tls_p->is_server = false;
-    _init_bio(L, tls_p);
+    _init_bio(L, tls_p, ctx_p);
     SSL_set_connect_state(tls_p->ssl);
 }
 
 static void
-_init_server_context(lua_State* L, struct tls_context* tls_p) {
-    luaL_error(L, "new server todo it!");
-
+_init_server_context(lua_State* L, struct tls_context* tls_p, struct ssl_ctx* ctx_p) {
     tls_p->is_server = true;
-    _init_bio(L, tls_p);
+    _init_bio(L, tls_p, ctx_p);
     SSL_set_accept_state(tls_p->ssl);
 }
 
@@ -83,6 +77,15 @@ _check_context(lua_State* L, int idx) {
     return tls_p;
 }
 
+static struct ssl_ctx *
+_check_sslctx(lua_State* L, int idx) {
+    struct ssl_ctx* ctx_p = (struct ssl_ctx*)lua_touserdata(L, idx);
+    if(!ctx_p) {
+        luaL_error(L, "need sslctx");
+    }
+    return ctx_p;
+}
+
 static int
 _ltls_context_finished(lua_State* L) {
     struct tls_context* tls_p = _check_context(L, 1);
@@ -95,8 +98,6 @@ static int
 _ltls_context_close(lua_State* L) {
     struct tls_context* tls_p = lua_touserdata(L, 1);
     if(!tls_p->is_close) {
-        SSL_CTX_free(tls_p->ctx);
-        tls_p->ctx = NULL;
         SSL_free(tls_p->ssl);
         tls_p->ssl = NULL;
         tls_p->in_bio = NULL; //in_bio and out_bio will be free when SSL_free is called
@@ -229,10 +230,6 @@ _ltls_context_write(lua_State* L) {
     size_t slen = 0;
     char* unencrypted_data = (char*)lua_tolstring(L, 2, &slen);
 
-    if(slen <=0 || !unencrypted_data) {
-        luaL_error(L, "need unencrypted data");
-    }
-
     while(slen >0) {
         int written = SSL_write(tls_p->ssl, unencrypted_data,  slen);
         if(written < 0) {
@@ -254,16 +251,98 @@ _ltls_context_write(lua_State* L) {
 }
 
 
+static int
+_lctx_gc(lua_State* L) {
+    struct ssl_ctx* ctx_p = _check_sslctx(L, 1);
+    if(ctx_p->ctx) {
+        SSL_CTX_free(ctx_p->ctx);
+        ctx_p->ctx = NULL;
+    }
+    return 0;
+}
+
+static int
+_lctx_cert(lua_State* L) {
+    struct ssl_ctx* ctx_p = _check_sslctx(L, 1);
+    const char* certfile = lua_tostring(L, 2);
+    const char* key = lua_tostring(L, 3);
+    if(!certfile) {
+        luaL_error(L, "need certfile");
+    }
+
+    if(!key) {
+        luaL_error(L, "need private key");
+    }
+
+    int ret = SSL_CTX_use_certificate_file(ctx_p->ctx, certfile, SSL_FILETYPE_PEM);
+    if(ret != 1) {
+        luaL_error(L, "SSL_CTX_use_certificate_file error:%d", ret);
+    }
+
+    ret = SSL_CTX_use_PrivateKey_file(ctx_p->ctx, key, SSL_FILETYPE_PEM);
+    if(ret != 1) {
+        luaL_error(L, "SSL_CTX_use_PrivateKey_file error:%d", ret);
+    }
+    ret = SSL_CTX_check_private_key(ctx_p->ctx);
+    if(ret != 1) {
+        luaL_error(L, "SSL_CTX_check_private_key error:%d", ret);
+    }
+    return 0;
+}
+
+static int
+_lctx_ciphers(lua_State* L) {
+    struct ssl_ctx* ctx_p = _check_sslctx(L, 1);
+    const char* s = lua_tostring(L, 2);
+    if(!s) {
+        luaL_error(L, "need cipher list");
+    }
+    int ret = SSL_CTX_set_tlsext_use_srtp(ctx_p->ctx, s);
+    if(ret != 0) {
+        luaL_error(L, "SSL_CTX_set_tlsext_use_srtp error:%d", ret);
+    }
+    return 0;
+}
+
+
 int
-ltls_new(lua_State* L) {
-    /* create a new context using DTLS */
+ltls_newctx(lua_State* L) {
+    struct ssl_ctx* ctx_p = (struct ssl_ctx*)lua_newuserdata(L, sizeof(*ctx_p));
+    ctx_p->ctx = SSL_CTX_new(SSLv23_method());
+    if(!ctx_p->ctx) {
+        luaL_error(L, "SSL_CTX_new client faild.");
+    }
+
+    if(luaL_newmetatable(L, "_TLS_SSLCTX_METATABLE_")) {
+        luaL_Reg l[] = {
+            {"set_ciphers", _lctx_ciphers},
+            {"set_cert", _lctx_cert},
+            {NULL, NULL},
+        };
+
+        luaL_newlib(L, l);
+        lua_setfield(L, -2, "__index");
+        lua_pushcfunction(L, _lctx_gc);
+        lua_setfield(L, -2, "__gc");
+    }
+    lua_setmetatable(L, -2);
+    return 1;
+}
+
+
+int
+ltls_newtls(lua_State* L) {
     struct tls_context* tls_p = (struct tls_context*)lua_newuserdata(L, sizeof(*tls_p));
     tls_p->is_close = false;
-    const char* method = luaL_optstring(L, 1, "client");
+    const char* method = luaL_optstring(L, 1, "nil");
+    struct ssl_ctx* ctx_p = _check_sslctx(L, 2);
+    lua_pushvalue(L, 2);
+    lua_setuservalue(L, -2); // set ssl_ctx associated to tls_context
+
     if(strcmp(method, "client") == 0) {
-        _init_client_context(L, tls_p);
+        _init_client_context(L, tls_p, ctx_p);
     }else if(strcmp(method, "server") == 0) {
-        _init_server_context(L, tls_p);
+        _init_server_context(L, tls_p, ctx_p);
     } else {
         luaL_error(L, "invalid method:%s e.g[server, client]", method);
     }

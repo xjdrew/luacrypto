@@ -1946,7 +1946,8 @@ int luaopen_crypto(lua_State* L)
         { "hex", luacrypto_hex },
         { "base64", luacrypto_base64_encode },
         { "unbase64", luacrypto_base64_decode },
-        { "newtls", ltls_new},
+        { "newtls", ltls_newtls},
+        { "newctx", ltls_newctx},
         { NULL, NULL }
     };
 
